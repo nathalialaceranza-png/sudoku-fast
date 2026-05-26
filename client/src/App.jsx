@@ -484,10 +484,9 @@ function PracticeView({ playerId, practiceStats, onStatsUpdate, difficulty, onDi
 
   return (
     <div>
-      <div style={s.card}>
+      <div style={s.cardHeader}>
         <div style={s.row}>
           <div>
-            <div style={s.title}>Practice</div>
             <div style={s.sub}>
               Difficulty:&nbsp;
               <select value={difficulty} onChange={e => onDifficultyChange(e.target.value)} style={s.select}>
@@ -971,7 +970,7 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, diffic
   if (phase === "lobby") {
     return (
       <div>
-        <div style={{ ...s.card, textAlign: "center" }}>
+        <div style={{ ...s.cardHeader, textAlign: "center" }}>
           <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 8 }}>Competition</div>
           <div style={{ marginBottom: 16, color: "rgba(232,239,255,0.65)" }}>
             {onlineCount} player{onlineCount !== 1 ? "s" : ""} online
@@ -996,7 +995,7 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, diffic
   if (phase === "searching") {
     return (
       <div>
-        <div style={{ ...s.card, textAlign: "center", padding: "40px 20px" }}>
+        <div style={{ ...s.cardHeader, textAlign: "center", padding: "40px 20px" }}>
           <div style={{ fontSize: 18, marginBottom: 20, color: "rgba(232,239,255,0.8)" }}>
             Searching for opponent...
           </div>
@@ -1015,7 +1014,7 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, diffic
   if (phase === "countdown") {
     return (
       <div>
-        <div style={{ ...s.card, textAlign: "center", padding: "40px 20px" }}>
+        <div style={{ ...s.cardHeader, textAlign: "center", padding: "40px 20px" }}>
           <div style={{ fontSize: 14, color: "rgba(232,239,255,0.6)", marginBottom: 8 }}>Match found!</div>
           <div style={{ fontSize: 16, marginBottom: 20 }}>vs <strong>{opponentName}</strong></div>
           <div style={{ fontSize: 64, fontWeight: 900, color: countdownSec <= 1 ? "#ff4d6d" : "#d4e8ff" }}>{countdownSec > 0 ? countdownSec : "Go!"}</div>
@@ -1027,7 +1026,7 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, diffic
   if (showResult && duelResult) {
     return (
       <div>
-        <div style={{ ...s.card, textAlign: "center" }}>
+        <div style={{ ...s.cardHeader, textAlign: "center" }}>
           {duelResult.won ? (
             <>
               <div style={{ fontSize: 46, marginBottom: 8 }}>🏆</div>
@@ -1057,10 +1056,9 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, diffic
 
   return (
     <div>
-      <div style={s.card}>
+      <div style={s.cardHeader}>
         <div style={s.row}>
           <div>
-            <div style={s.title}>Compete</div>
             <div style={s.sub}>
               vs <strong>{opponentName}</strong>
               <span style={{ marginLeft: 8, fontSize: 12, color: "rgba(232,239,255,0.4)" }}>{difficulty}</span>
@@ -1153,26 +1151,40 @@ const s = {
     minHeight: "100vh",
     background: "linear-gradient(#070c16, #0b1220)",
     color: "#e8efff",
-    padding: "60px 14px 14px",
+    padding: "0 14px 14px",
     fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial",
     maxWidth: 520,
     margin: "0 auto",
   },
   tabBar: {
-    position: "fixed", top: 0, left: 0, right: 0, zIndex: 100,
-    display: "flex", background: "rgba(7,12,22,0.95)",
-    borderBottom: "1px solid rgba(255,255,255,0.10)",
-    backdropFilter: "blur(10px)", maxWidth: 520, margin: "0 auto",
+    display: "flex",
+    gap: "4px",
+    padding: "10px 0 0",
+    maxWidth: 520, margin: "0 auto",
   },
   tab: {
-    flex: 1, padding: "14px 0", textAlign: "center", fontSize: 15,
-    fontWeight: 700, color: "rgba(232,239,255,0.5)",
-    background: "transparent", border: 0, cursor: "pointer",
+    flex: 1, padding: "11px 0 9px", textAlign: "center", fontSize: 14,
+    fontWeight: 700, color: "rgba(232,239,255,0.35)",
+    background: "rgba(10,18,34,0.55)",
+    border: "1px solid rgba(255,255,255,0.06)",
+    borderBottom: "1px solid rgba(255,255,255,0.10)",
+    borderRadius: "10px 10px 0 0", cursor: "pointer",
   },
   tabActive: {
-    flex: 1, padding: "14px 0", textAlign: "center", fontSize: 15,
-    fontWeight: 700, color: "#4da3ff", background: "transparent",
-    border: 0, borderBottom: "2px solid #4da3ff", cursor: "pointer",
+    flex: 1, padding: "11px 0 9px", textAlign: "center", fontSize: 14,
+    fontWeight: 700, color: "#4da3ff",
+    background: "rgba(18,28,48,0.78)",
+    border: "1px solid rgba(255,255,255,0.12)",
+    borderBottom: "none",
+    borderRadius: "10px 10px 0 0", cursor: "pointer",
+    zIndex: 1,
+  },
+  cardHeader: {
+    background: "rgba(18,28,48,0.78)",
+    border: "1px solid rgba(255,255,255,0.12)",
+    borderTop: "none",
+    borderRadius: "0 0 18px 18px", padding: 14,
+    boxShadow: "0 14px 40px rgba(0,0,0,0.35)", marginBottom: 12,
   },
   card: {
     background: "rgba(18,28,48,0.78)",
