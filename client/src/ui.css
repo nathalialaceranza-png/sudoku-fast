@@ -1,0 +1,37 @@
+:root {
+  --bg: #0b1220;
+  --card: #121c30;
+  --muted: #7f90b3;
+  --text: #e8efff;
+  --accent: #4da3ff;
+  --danger: #ff4d6d;
+  --ok: #40d39c;
+  --grid: rgba(255,255,255,0.12);
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  background: radial-gradient(1200px 800px at 50% -200px, rgba(77,163,255,0.25), transparent 60%),
+              linear-gradient(#070c16, var(--bg));
+  color: var(--text);
+}
+
+button {
+  font: inherit;
+  border: 0;
+  color: var(--text);
+  background: #1a2742;
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+
+button:active { transform: scale(0.98); }
+
+@keyframes frostShimmer {
+  0%, 100% { opacity: 0.55; }
+  33% { opacity: 0.7; }
+  66% { opacity: 0.85; }
+}
