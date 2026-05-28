@@ -1040,7 +1040,7 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, diffic
             <>
               <div style={{ fontSize: 46, marginBottom: 8 }}>🏆</div>
               <div style={{ fontSize: 20, fontWeight: 900, marginBottom: 12 }}>
-                Opponent disconnected — you won!
+                Your opponent gave up!<br />Find someone worth it!
               </div>
             </>
           ) : duelResult.won ? (
