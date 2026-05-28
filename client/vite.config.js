@@ -6,6 +6,7 @@ export default defineConfig({
   server: {
     host: true,
     port: 5173,
+    allowedHosts: true,
     proxy: {
       "/socket.io": { target: "http://localhost:4000", ws: true },
       "/puzzle": "http://localhost:4000",

@@ -115,34 +115,22 @@ export default function App() {
 
   return (
     <div style={s.page}>
-      <TabBar tab={tab} onTabChange={setTab} />
       {tab === "practice" ? (
         <PracticeView playerId={playerId} practiceStats={practiceStats}
           difficulty={difficulty} onDifficultyChange={setDifficulty}
-          onStatsUpdate={s => setPracticeStats(s)} />
+          onStatsUpdate={s => setPracticeStats(s)}
+          tab={tab} onTabChange={setTab} />
       ) : (
         <CompeteView playerId={playerId} playerName={playerName}
           difficulty={difficulty} onDifficultyChange={setDifficulty}
-          competeStats={competeStats} onStatsUpdate={s => setCompeteStats(s)} />
+          competeStats={competeStats} onStatsUpdate={s => setCompeteStats(s)}
+          tab={tab} onTabChange={setTab} />
       )}
     </div>
   );
 }
 
-function TabBar({ tab, onTabChange }) {
-  return (
-    <div style={s.tabBar}>
-      <button style={tab === "practice" ? s.tabActive : s.tab} onClick={() => onTabChange("practice")}>
-        Practice
-      </button>
-      <button style={tab === "compete" ? s.tabActive : s.tab} onClick={() => onTabChange("compete")}>
-        Compete
-      </button>
-    </div>
-  );
-}
-
-function PracticeView({ playerId, practiceStats, onStatsUpdate, difficulty, onDifficultyChange }) {
+function PracticeView({ playerId, practiceStats, onStatsUpdate, difficulty, onDifficultyChange, tab, onTabChange }) {
   const [board, setBoard] = useState(Array(81).fill(0));
   const [given, setGiven] = useState(new Set());
   const [solution, setSolution] = useState(null);
@@ -484,21 +472,27 @@ function PracticeView({ playerId, practiceStats, onStatsUpdate, difficulty, onDi
 
   return (
     <div>
-      <div style={s.cardHeader}>
-        <div style={s.row}>
-          <div>
-            <div style={s.sub}>
-              Difficulty:&nbsp;
-              <select value={difficulty} onChange={e => onDifficultyChange(e.target.value)} style={s.select}>
-                {DIFFICULTIES.map(d => <option key={d} value={d}>{d}</option>)}
-              </select>
-              <button style={s.btn} onClick={() => newGame(difficulty)}>New game</button>
-            </div>
-          </div>
-          <div style={s.timer}>⏱ {formatTime(elapsedMs)}</div>
+      <div style={s.tabArea}>
+        <div style={s.tabRow}>
+          <button style={{ ...s.tabBtnActive, marginRight: -1 }}>Practice</button>
+          <button style={{ ...s.tabBtn, marginLeft: -1 }} onClick={() => onTabChange("compete")}>Compete</button>
         </div>
-        <div style={s.statRow}>
-          Best: <strong>{bestMs ? formatTime(bestMs) : "—"}</strong>
+        <div style={s.headerContent}>
+          <div style={s.row}>
+            <div>
+              <div style={s.sub}>
+                Difficulty:&nbsp;
+                <select value={difficulty} onChange={e => onDifficultyChange(e.target.value)} style={s.select}>
+                  {DIFFICULTIES.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+                <button style={s.btn} onClick={() => newGame(difficulty)}>New game</button>
+              </div>
+            </div>
+            <div style={s.timer}>⏱ {formatTime(elapsedMs)}</div>
+          </div>
+          <div style={s.statRow}>
+            Best: <strong>{bestMs ? formatTime(bestMs) : "—"}</strong>
+          </div>
         </div>
       </div>
 
@@ -591,7 +585,7 @@ function PracticeView({ playerId, practiceStats, onStatsUpdate, difficulty, onDi
   );
 }
 
-function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, difficulty, onDifficultyChange }) {
+function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, difficulty, onDifficultyChange, tab, onTabChange }) {
   const [phase, setPhase] = useState("lobby");
   const [onlineCount, setOnlineCount] = useState(0);
   const [socket, setSocket] = useState(null);
@@ -969,9 +963,12 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, diffic
 
   if (phase === "lobby") {
     return (
-      <div>
-        <div style={{ ...s.cardHeader, textAlign: "center" }}>
-          <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 8 }}>Competition</div>
+      <div style={s.tabArea}>
+        <div style={s.tabRow}>
+          <button style={{ ...s.tabBtn, marginRight: -1 }} onClick={() => onTabChange("practice")}>Practice</button>
+          <button style={{ ...s.tabBtnActive, marginLeft: -1 }}>Compete</button>
+        </div>
+        <div style={s.headerContent}>
           <div style={{ marginBottom: 16, color: "rgba(232,239,255,0.65)" }}>
             {onlineCount} player{onlineCount !== 1 ? "s" : ""} online
           </div>
@@ -994,8 +991,12 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, diffic
 
   if (phase === "searching") {
     return (
-      <div>
-        <div style={{ ...s.cardHeader, textAlign: "center", padding: "40px 20px" }}>
+      <div style={s.tabArea}>
+        <div style={s.tabRow}>
+          <button style={{ ...s.tabBtn, marginRight: -1 }} onClick={() => onTabChange("practice")}>Practice</button>
+          <button style={{ ...s.tabBtnActive, marginLeft: -1 }}>Compete</button>
+        </div>
+        <div style={{ ...s.headerContent, textAlign: "center", padding: "40px 20px" }}>
           <div style={{ fontSize: 18, marginBottom: 20, color: "rgba(232,239,255,0.8)" }}>
             Searching for opponent...
           </div>
@@ -1013,8 +1014,12 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, diffic
 
   if (phase === "countdown") {
     return (
-      <div>
-        <div style={{ ...s.cardHeader, textAlign: "center", padding: "40px 20px" }}>
+      <div style={s.tabArea}>
+        <div style={s.tabRow}>
+          <button style={{ ...s.tabBtn, marginRight: -1 }} onClick={() => onTabChange("practice")}>Practice</button>
+          <button style={{ ...s.tabBtnActive, marginLeft: -1 }}>Compete</button>
+        </div>
+        <div style={{ ...s.headerContent, textAlign: "center", padding: "40px 20px" }}>
           <div style={{ fontSize: 14, color: "rgba(232,239,255,0.6)", marginBottom: 8 }}>Match found!</div>
           <div style={{ fontSize: 16, marginBottom: 20 }}>vs <strong>{opponentName}</strong></div>
           <div style={{ fontSize: 64, fontWeight: 900, color: countdownSec <= 1 ? "#ff4d6d" : "#d4e8ff" }}>{countdownSec > 0 ? countdownSec : "Go!"}</div>
@@ -1025,8 +1030,12 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, diffic
 
   if (showResult && duelResult) {
     return (
-      <div>
-        <div style={{ ...s.cardHeader, textAlign: "center" }}>
+      <div style={s.tabArea}>
+        <div style={s.tabRow}>
+          <button style={{ ...s.tabBtn, marginRight: -1 }} onClick={() => onTabChange("practice")}>Practice</button>
+          <button style={{ ...s.tabBtnActive, marginLeft: -1 }}>Compete</button>
+        </div>
+        <div style={{ ...s.headerContent, textAlign: "center" }}>
           {duelResult.won ? (
             <>
               <div style={{ fontSize: 46, marginBottom: 8 }}>🏆</div>
@@ -1055,8 +1064,12 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, diffic
   }
 
   return (
-    <div>
-      <div style={s.cardHeader}>
+    <div style={s.tabArea}>
+      <div style={s.tabRow}>
+        <button style={{ ...s.tabBtn, marginRight: -1 }} onClick={() => onTabChange("practice")}>Practice</button>
+        <button style={{ ...s.tabBtnActive, marginLeft: -1 }}>Compete</button>
+      </div>
+      <div style={s.headerContent}>
         <div style={s.row}>
           <div>
             <div style={s.sub}>
@@ -1146,45 +1159,53 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, diffic
   );
 }
 
+
 const s = {
   page: {
     minHeight: "100vh",
     background: "linear-gradient(#070c16, #0b1220)",
     color: "#e8efff",
-    padding: "0 14px 14px",
+    padding: "14px",
     fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial",
     maxWidth: 520,
     margin: "0 auto",
   },
-  tabBar: {
+  tabArea: {
+    marginBottom: 12,
+  },
+  tabRow: {
     display: "flex",
-    gap: "4px",
-    padding: "10px 0 0",
-    maxWidth: 520, margin: "0 auto",
   },
-  tab: {
-    flex: 1, padding: "11px 0 9px", textAlign: "center", fontSize: 14,
+  tabBtn: {
+    flex: 1, padding: "11px 0", textAlign: "center", fontSize: 14,
     fontWeight: 700, color: "rgba(232,239,255,0.35)",
-    background: "rgba(10,18,34,0.55)",
-    border: "1px solid rgba(255,255,255,0.06)",
-    borderBottom: "1px solid rgba(255,255,255,0.10)",
-    borderRadius: "10px 10px 0 0", cursor: "pointer",
+    background: "rgba(10,18,34,0.6)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderBottom: "1px solid rgba(255,255,255,0.12)",
+    borderRadius: "9px 9px 5px 5px",
+    cursor: "pointer",
+    position: "relative",
+    zIndex: 1,
   },
-  tabActive: {
-    flex: 1, padding: "11px 0 9px", textAlign: "center", fontSize: 14,
+  tabBtnActive: {
+    flex: 1, padding: "11px 0", textAlign: "center", fontSize: 14,
     fontWeight: 700, color: "#4da3ff",
     background: "rgba(18,28,48,0.78)",
     border: "1px solid rgba(255,255,255,0.12)",
     borderBottom: "none",
-    borderRadius: "10px 10px 0 0", cursor: "pointer",
-    zIndex: 1,
+    borderRadius: "9px 9px 0 0",
+    cursor: "pointer",
+    position: "relative",
+    zIndex: 3,
   },
-  cardHeader: {
+  headerContent: {
+    padding: 14,
     background: "rgba(18,28,48,0.78)",
     border: "1px solid rgba(255,255,255,0.12)",
     borderTop: "none",
-    borderRadius: "0 0 18px 18px", padding: 14,
-    boxShadow: "0 14px 40px rgba(0,0,0,0.35)", marginBottom: 12,
+    borderRadius: "0 0 18px 18px",
+    position: "relative",
+    zIndex: 2,
   },
   card: {
     background: "rgba(18,28,48,0.78)",

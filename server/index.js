@@ -10,6 +10,7 @@ import { generatePuzzle } from "./sudoku.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, "data");
 const STATS_FILE = path.join(DATA_DIR, "stats.json");
+const CLIENT_DIST = path.join(__dirname, "..", "client", "dist");
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
 
@@ -24,6 +25,7 @@ function saveStats(stats) {
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use(express.static(CLIENT_DIST));
 
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*", methods: ["GET", "POST"] } });
