@@ -49,6 +49,7 @@ function tryMatch(player) {
 
 function verifySolution(board, solution) {
   if (!Array.isArray(board) || board.length !== 81) return false;
+  if (board.some(v => v === 0 || v === null || v === undefined)) return false;
   for (let i = 0; i < 81; i++) {
     if (Number(board[i]) !== Number(solution[i])) return false;
   }

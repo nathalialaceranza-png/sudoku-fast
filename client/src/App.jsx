@@ -844,7 +844,7 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, diffic
     setBoard(nextBoard);
     setNotes(nextNotes);
     detectNewCompletions(prevBoard, nextBoard, index);
-    if (duelSolution && nextBoard.every((v, i) => v === duelSolution[i])) {
+    if (duelSolution && nextBoard.every(v => v !== 0) && nextBoard.every((v, i) => v === duelSolution[i])) {
       setStopMs(Date.now());
       handleFinish(nextBoard);
     }
