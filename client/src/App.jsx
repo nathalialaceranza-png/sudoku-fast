@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { io } from "socket.io-client";
+import confetti from "canvas-confetti";
 
 const DIFFICULTIES = ["Easy", "Medium", "Hard", "Expert", "Master"];
 const SERVER_URL = ``;
@@ -122,7 +123,6 @@ export default function App() {
           tab={tab} onTabChange={setTab} />
       ) : (
         <CompeteView playerId={playerId} playerName={playerName}
-          difficulty={difficulty} onDifficultyChange={setDifficulty}
           competeStats={competeStats} onStatsUpdate={s => setCompeteStats(s)}
           tab={tab} onTabChange={setTab} />
       )}
@@ -155,6 +155,7 @@ function PracticeView({ playerId, practiceStats, onStatsUpdate, difficulty, onDi
   const [dragging, setDragging] = useState(false);
   const dragVisitedRef = useRef(new Set());
   const gridRef = useRef(null);
+  const confettiCanvasRef = useRef(null);
 
   const LOCK_PRESS_MS = 180;
   const COMPLETE_FLASH_MS = 520;
@@ -248,6 +249,16 @@ function PracticeView({ playerId, practiceStats, onStatsUpdate, difficulty, onDi
     undoRef.current.push({ prevBoard, prevNotes });
     if (undoRef.current.length > 300) undoRef.current.shift();
   };
+
+  const bestMs = practiceStats?.[difficulty] || null;
+  const isNewRecord = bestMs === null || (stopMs !== null && stopMs - startMs <= bestMs);
+
+  useEffect(() => {
+    if (showWinModal && isNewRecord && confettiCanvasRef.current) {
+      const myConfetti = confetti.create(confettiCanvasRef.current, { resize: true });
+      myConfetti({ particleCount: 120, spread: 100, origin: { y: 0.6 }, colors: ["#4da3ff", "#40d39c", "#ffd700"] });
+    }
+  }, [showWinModal, isNewRecord]);
 
   const handleUndo = () => {
     const last = undoRef.current.pop();
@@ -468,8 +479,6 @@ function PracticeView({ playerId, practiceStats, onStatsUpdate, difficulty, onDi
   const completedWaveProgress = completedFlash.untilMs > nowMs
     ? 1 - (completedFlash.untilMs - nowMs) / COMPLETE_FLASH_MS : 1;
 
-  const bestMs = practiceStats?.[difficulty] || null;
-
   return (
     <div>
       <div style={s.tabArea}>
@@ -571,21 +580,27 @@ function PracticeView({ playerId, practiceStats, onStatsUpdate, difficulty, onDi
       </div>
 
       {showWinModal && (
-        <div style={s.modalBackdrop}>
-          <div style={s.modalCard}>
-            <div style={s.trophy}>🏆</div>
-            <div style={s.modalTitle}>Good job!</div>
-            <div style={s.modalText}>Your time was {formatTime(elapsedMs)}!</div>
-            <div style={s.modalSub}>{bestMs !== null && elapsedMs <= bestMs ? "New record! 🎉" : ""}</div>
-            <button type="button" style={s.primaryBtn} onClick={() => newGame(difficulty)}>Play again</button>
+        <>
+          <canvas ref={confettiCanvasRef} style={{
+            position: "fixed", inset: 0, pointerEvents: "none",
+            zIndex: 10001, width: "100%", height: "100%"
+          }} />
+          <div style={s.modalBackdrop}>
+            <div style={s.modalCard}>
+              <div style={s.trophy}>🏆</div>
+              <div style={s.modalTitle}>{isNewRecord ? "New record!" : "Good job!"}</div>
+              <div style={s.modalText}>Your time was {formatTime(elapsedMs)}!</div>
+              {isNewRecord && <div style={s.modalSub}>Personal best</div>}
+              <button type="button" style={s.primaryBtn} onClick={() => newGame(difficulty)}>Play again</button>
+            </div>
           </div>
-        </div>
+        </>
       )}
     </div>
   );
 }
 
-function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, difficulty, onDifficultyChange, tab, onTabChange }) {
+function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, tab, onTabChange }) {
   const [phase, setPhase] = useState("lobby");
   const [onlineCount, setOnlineCount] = useState(0);
   const [socket, setSocket] = useState(null);
@@ -611,6 +626,19 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, diffic
   const [completedFlash, setCompletedFlash] = useState({ rows: [], cols: [], boxes: [], untilMs: 0, originIndex: null });
   const [playerSide, setPlayerSide] = useState(1);
   const [duelSolution, setDuelSolution] = useState(null);
+  const [queueCounts, setQueueCounts] = useState({ Easy: 0, Medium: 0, Hard: 0, Expert: 0, Master: 0 });
+  const [searchDiff, setSearchDiff] = useState(null);
+  const COMPETE_LABELS = ["Compete in Easy", "Compete in Medium", "Compete in Hard", "Compete in Expert", "Compete in Master"];
+  const UNLOCK_REQS = ["", "3 wins in Easy", "3 wins in Medium", "3 wins in Hard", "3 wins in Expert"];
+
+  const unlockedLevel = useMemo(() => {
+    if (!competeStats) return 0;
+    if ((competeStats.Expert?.wins || 0) >= 3) return 4;
+    if ((competeStats.Hard?.wins || 0) >= 3) return 3;
+    if ((competeStats.Medium?.wins || 0) >= 3) return 2;
+    if ((competeStats.Easy?.wins || 0) >= 3) return 1;
+    return 0;
+  }, [competeStats]);
 
   const undoRef = useRef([]);
   const longPressRef = useRef(null);
@@ -619,6 +647,7 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, diffic
   const dragVisitedRef = useRef(new Set());
   const gridRef = useRef(null);
   const socketRef = useRef(null);
+  const confettiCanvasRef = useRef(null);
 
   const LOCK_PRESS_MS = 180;
   const COMPLETE_FLASH_MS = 520;
@@ -637,7 +666,6 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, diffic
   const remainingOf = (n) => Math.max(0, 9 - usedCount[n]);
   const isFrozen = freezeUntilMs > nowMs;
   const freezeRemaining = isFrozen ? Math.ceil((freezeUntilMs - nowMs) / 1000) : 0;
-  const bestCompeteMs = competeStats?.[difficulty]?.bestMs || null;
 
   useEffect(() => {
     const s = io(SOCKET_URL);
@@ -645,9 +673,13 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, diffic
     setSocket(s);
 
     s.on("lobby:count", setOnlineCount);
+    s.on("queue:counts", setQueueCounts);
+    s.on("matchmaking:unlocked", ({ level }) => setUnlockedLevel(level));
+    s.on("matchmaking:rejected", () => { setPhase("lobby"); setSearchDiff(null); });
     s.on("matchmaking:queued", () => {});
-    s.on("matchmaking:cancelled", () => setPhase("lobby"));
+    s.on("matchmaking:cancelled", () => { setPhase("lobby"); setSearchDiff(null); });
     s.on("matchmaking:found", (data) => {
+      setSearchDiff(null);
       setMatchData(data);
       setOpponentName(data.opponentName);
       setPlayerSide(data.playerSide);
@@ -685,14 +717,21 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, diffic
     s.on("duel:finishRejected", () => {});
     s.on("duel:result", (data) => {
       setDuelResult(data);
-      setShowResult(true);
       setStopMs(Date.now());
-      fetch(`${SERVER_URL}/stats/${playerId}`).then(r => r.json()).then(d => onStatsUpdate(d.compete || {})).catch(() => {});
+      setTimeout(() => setShowResult(true), 500);
+      fetch(`${SERVER_URL}/stats/${playerId}`).then(r => r.json()).then(d => {
+        onStatsUpdate(d.compete || {});
+      }).catch(() => {});
     });
     s.on("duel:opponentDisconnected", () => {
       setDuelResult({ won: true, myTime: null, opponentTime: null, winnerName: playerName, opponentName: "Opponent", disconnected: true });
-      setShowResult(true);
       setStopMs(Date.now());
+      setTimeout(() => setShowResult(true), 500);
+    });
+    s.on("duel:youWereDisconnected", (data) => {
+      setDuelResult(data);
+      setStopMs(Date.now());
+      setTimeout(() => setShowResult(true), 500);
     });
 
     s.emit("lobby:enter", { playerId, playerName });
@@ -706,6 +745,13 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, diffic
     }, 5000);
     return () => clearInterval(iv);
   }, []);
+
+  useEffect(() => {
+    if (showResult && duelResult?.won && !duelResult?.disconnected && confettiCanvasRef.current) {
+      const myConfetti = confetti.create(confettiCanvasRef.current, { resize: true });
+      myConfetti({ particleCount: 120, spread: 100, origin: { y: 0.6 }, colors: ["#4da3ff", "#40d39c", "#ffd700"] });
+    }
+  }, [showResult, duelResult]);
 
   useEffect(() => {
     let raf;
@@ -943,10 +989,11 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, diffic
   const completedWaveProgress = completedFlash.untilMs > nowMs
     ? 1 - (completedFlash.untilMs - nowMs) / COMPLETE_FLASH_MS : 1;
 
-  const handleFindMatch = () => {
+  const handleFindMatch = (diff) => {
     if (!socketRef.current) return;
+    setSearchDiff(diff);
     setPhase("searching");
-    socketRef.current.emit("matchmaking:search", { difficulty, playerId, playerName });
+    socketRef.current.emit("matchmaking:search", { difficulty: diff, playerId, playerName });
   };
 
   const handleCancelSearch = () => {
@@ -966,6 +1013,7 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, diffic
     setDuelResult(null);
     setStartMs(null);
     setStopMs(null);
+    setSearchDiff(null);
   };
 
   if (phase === "lobby") {
@@ -977,20 +1025,36 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, diffic
         </div>
         <div style={s.headerContent}>
           <div style={{ marginBottom: 16, color: "rgba(232,239,255,0.65)" }}>
-            {onlineCount} player{onlineCount !== 1 ? "s" : ""} online
+            🟢 {onlineCount} player{onlineCount !== 1 ? "s" : ""} online
           </div>
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ marginBottom: 8, fontSize: 14, color: "rgba(232,239,255,0.7)" }}>Difficulty</div>
-              <select value={difficulty} onChange={e => onDifficultyChange(e.target.value)} style={s.select}>
-              {DIFFICULTIES.map(d => <option key={d} value={d}>{d}</option>)}
-            </select>
-          </div>
-          <div style={s.statRow}>
-            Best time: <strong>{bestCompeteMs ? formatTime(bestCompeteMs) : "—"}</strong>
-          </div>
-          <button style={{ ...s.primaryBtn, marginTop: 12 }} onClick={handleFindMatch} disabled={!socket}>
-            Compete Now
-          </button>
+          {DIFFICULTIES.map((d, i) => {
+            const unlocked = i <= unlockedLevel;
+            const wins = competeStats?.[d]?.wins || 0;
+            const best = competeStats?.[d]?.bestMs;
+            return (
+              <div key={d} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                  <span style={{ fontSize: 15, fontWeight: 700, color: unlocked ? "inherit" : "rgba(232,239,255,0.3)" }}>
+                    {COMPETE_LABELS[i]}
+                  </span>
+                  {unlocked && (
+                    <span style={{ fontSize: 12, color: "rgba(232,239,255,0.45)" }}>
+                      🏆 {wins} · Best: {best ? formatTime(best) : "—"}
+                    </span>
+                  )}
+                </div>
+                {unlocked ? (
+                  <button style={{ padding: "8px 20px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.14)", background: "linear-gradient(180deg, #3c8dff, #2268ff)", color: "white", fontWeight: 700, fontSize: 13, cursor: "pointer", width: 80, textAlign: "center" }} onClick={() => handleFindMatch(d)} disabled={!socket}>
+                    Play
+                  </button>
+                ) : (
+                  <span style={{ fontSize: 12, color: "rgba(232,239,255,0.35)", whiteSpace: "nowrap" }}>
+                    {UNLOCK_REQS[i]} 🔒
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
     );
@@ -1005,11 +1069,11 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, diffic
         </div>
         <div style={{ ...s.headerContent, textAlign: "center", padding: "40px 20px" }}>
           <div style={{ fontSize: 18, marginBottom: 20, color: "rgba(232,239,255,0.8)" }}>
-            Searching for opponent...
+            Searching for {searchDiff} opponent...
           </div>
           <div style={{ fontSize: 40, marginBottom: 20 }}>⏳</div>
           <div style={{ fontSize: 14, color: "rgba(232,239,255,0.5)", marginBottom: 24 }}>
-            {difficulty} · {onlineCount} online
+            {onlineCount} online
           </div>
           <button style={{ ...s.primaryBtn, background: "linear-gradient(180deg, #ff4d6d, #cc2450)" }} onClick={handleCancelSearch}>
             Cancel
@@ -1037,17 +1101,29 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, diffic
 
   if (showResult && duelResult) {
     return (
-      <div style={s.tabArea}>
+      <>
+        <canvas ref={confettiCanvasRef} style={{
+          position: "fixed", inset: 0, pointerEvents: "none",
+          zIndex: 10001, width: "100%", height: "100%"
+        }} />
+        <div style={s.tabArea}>
         <div style={s.tabRow}>
           <button style={{ ...s.tabBtn, marginRight: -1 }} onClick={() => onTabChange("practice")}>Practice</button>
           <button style={{ ...s.tabBtnActive, marginLeft: -1 }}>Compete</button>
         </div>
-        <div style={{ ...s.headerContent, textAlign: "center" }}>
-          {duelResult.disconnected ? (
+        <div style={{ ...s.headerContent, textAlign: "center", animation: "resultFadeIn 0.5s ease-out" }}>
+          {duelResult.disconnected && duelResult.won ? (
             <>
               <div style={{ fontSize: 46, marginBottom: 8 }}>🏆</div>
+              <div style={{ fontSize: 18, fontWeight: 900, marginBottom: 12 }}>
+                Your opponent was disconnected.<br />Start another match!
+              </div>
+            </>
+          ) : duelResult.disconnected ? (
+            <>
+              <div style={{ fontSize: 46, marginBottom: 8 }}>😔</div>
               <div style={{ fontSize: 20, fontWeight: 900, marginBottom: 12 }}>
-                Your opponent gave up!<br />Find someone worth it!
+                You were disconnected — game is over!
               </div>
             </>
           ) : duelResult.won ? (
@@ -1074,6 +1150,7 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, diffic
           <button style={s.primaryBtn} onClick={handleBackToLobby}>Play again</button>
         </div>
       </div>
+      </>
     );
   }
 
@@ -1088,7 +1165,7 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, diffic
           <div>
             <div style={s.sub}>
               vs <strong>{opponentName}</strong>
-              <span style={{ marginLeft: 8, fontSize: 12, color: "rgba(232,239,255,0.4)" }}>{difficulty}</span>
+              <span style={{ marginLeft: 8, fontSize: 12, color: "rgba(232,239,255,0.4)" }}>{matchData?.difficulty}</span>
             </div>
           </div>
           <div style={s.timer}>⏱ {formatTime(elapsedMs)}</div>

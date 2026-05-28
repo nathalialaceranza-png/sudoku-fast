@@ -30,9 +30,46 @@ app.use(express.static(CLIENT_DIST));
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*", methods: ["GET", "POST"] } });
 
+const DIFFICULTIES = ["Easy", "Medium", "Hard", "Expert", "Master"];
 const matchQueue = [];
 const lobbySockets = new Set();
 const lastHeartbeat = new Map();
+const pendingDisconnectResults = new Map();
+
+function getUnlockedLevel(stats, playerId) {
+  const c = stats[playerId]?.compete || {};
+  if ((c.Expert?.wins || 0) >= 3) return 4;
+  if ((c.Hard?.wins || 0) >= 3) return 3;
+  if ((c.Medium?.wins || 0) >= 3) return 2;
+  if ((c.Easy?.wins || 0) >= 3) return 1;
+  return 0;
+}
+
+function emitUnlocked(socket) {
+  const stats = loadStats();
+  const level = getUnlockedLevel(stats, socket.data.playerId);
+  socket.emit("matchmaking:unlocked", { level });
+}
+
+function getQueueCounts() {
+  const counts = { Easy: 0, Medium: 0, Hard: 0, Expert: 0, Master: 0 };
+  for (const entry of matchQueue) {
+    counts[entry.difficulty]++;
+  }
+  return counts;
+}
+
+function broadcastQueueCounts() {
+  io.emit("queue:counts", getQueueCounts());
+}
+
+function cleanupSocketDuel(sock) {
+  delete sock.data.duelRoom;
+  delete sock.data.duelPlayers;
+  delete sock.data.duelSolution;
+  delete sock.data.duelStartAtMs;
+  delete sock.data.duelDifficulty;
+}
 
 setInterval(() => {
   const now = Date.now();
@@ -45,11 +82,33 @@ setInterval(() => {
           const opponentSocket = Object.keys(players).find(s => s !== sid);
           if (opponentSocket) {
             const oppSock = io.sockets.sockets.get(opponentSocket);
+            // Notify the active player
             if (oppSock) {
               oppSock.emit("duel:opponentDisconnected");
+              oppSock.data.duelOver = true;
+              cleanupSocketDuel(oppSock);
             }
           }
+
+          // Result for the inactive player
+          const pName = sock.data.playerName || "Player";
+          const oName = opponentSocket ? (players[opponentSocket]?.name || "Opponent") : "Opponent";
+          const result = {
+            won: false,
+            myTime: null,
+            opponentTime: null,
+            winnerName: oName,
+            opponentName: pName,
+            disconnected: true
+          };
+
+          sock.emit("duel:youWereDisconnected", result);
+
+          const pid = sock.data.playerId;
+          if (pid) pendingDisconnectResults.set(pid, result);
+
           sock.data.duelOver = true;
+          cleanupSocketDuel(sock);
         }
       }
       lastHeartbeat.delete(sid);
@@ -61,14 +120,68 @@ function broadcastCount() {
   io.emit("lobby:count", lobbySockets.size);
 }
 
+const MATCH_FALLBACK = { Medium: "Easy", Hard: "Medium", Expert: "Hard", Master: "Expert" };
+
+function searchRange(diff) {
+  const r = [diff];
+  const f = MATCH_FALLBACK[diff];
+  if (f) r.push(f);
+  return r;
+}
+
 function tryMatch(player) {
   const idx = matchQueue.findIndex(
-    m => m.socketId !== player.socketId && m.difficulty === player.difficulty && !m.matched
+    m => m.socketId !== player.socketId && searchRange(player.difficulty).includes(m.difficulty)
   );
   if (idx === -1) return null;
-  const opponent = matchQueue[idx];
-  opponent.matched = true;
+  const [opponent] = matchQueue.splice(idx, 1);
   return opponent;
+}
+
+function beginDuel(sockA, sockB, difficulty) {
+  if (!sockA || !sockB) return;
+  const { puzzle, solution } = generatePuzzle(difficulty);
+  const matchId = `${Date.now()}-${sockA.id}-${sockB.id}`;
+  const startAtMs = Date.now() + 2000;
+
+  sockA.join(matchId);
+  sockB.join(matchId);
+
+  sockA.data.duelRoom = matchId;
+  sockA.data.duelDifficulty = difficulty;
+  sockB.data.duelRoom = matchId;
+  sockB.data.duelDifficulty = difficulty;
+
+  const players = {
+    [sockA.id]: { name: sockA.data.playerName || "Player 1", playerId: sockA.data.playerId, finishedAtMs: null, elapsedMs: null },
+    [sockB.id]: { name: sockB.data.playerName || "Player 2", playerId: sockB.data.playerId, finishedAtMs: null, elapsedMs: null }
+  };
+
+  sockA.data.duelPlayers = players;
+  sockB.data.duelPlayers = players;
+  sockA.data.duelSolution = solution;
+  sockB.data.duelSolution = solution;
+  sockA.data.duelStartAtMs = startAtMs;
+  sockB.data.duelStartAtMs = startAtMs;
+  sockA.data.duelOver = false;
+  sockB.data.duelOver = false;
+
+  io.to(sockA.id).emit("matchmaking:found", {
+    matchId, difficulty, puzzle, solution, startAtMs,
+    opponentName: sockB.data.playerName || "Player 2",
+    playerSide: 1
+  });
+  io.to(sockB.id).emit("matchmaking:found", {
+    matchId, difficulty, puzzle, solution, startAtMs,
+    opponentName: sockA.data.playerName || "Player 1",
+    playerSide: 2
+  });
+
+  broadcastQueueCounts();
+
+  setTimeout(() => {
+    io.to(matchId).emit("duel:start", { startAtMs });
+  }, 0);
 }
 
 function verifySolution(board, solution) {
@@ -92,6 +205,13 @@ io.on("connection", (socket) => {
     socket.data.playerName = playerName;
     lobbySockets.add(socket.id);
     broadcastCount();
+    emitUnlocked(socket);
+
+    const pending = pendingDisconnectResults.get(playerId);
+    if (pending) {
+      pendingDisconnectResults.delete(playerId);
+      socket.emit("duel:youWereDisconnected", pending);
+    }
   });
 
   socket.on("lobby:leave", () => {
@@ -102,58 +222,47 @@ io.on("connection", (socket) => {
   });
 
   socket.on("matchmaking:search", ({ difficulty, playerId, playerName }) => {
-    const entry = { socketId: socket.id, difficulty, playerId, playerName };
-    const opponent = tryMatch(entry);
+    const stats = loadStats();
+    const level = getUnlockedLevel(stats, playerId);
+    if (DIFFICULTIES.indexOf(difficulty) > level) {
+      socket.emit("matchmaking:rejected", { message: "Level not unlocked" });
+      return;
+    }
+
+    // 1. Try to match with existing queuers
+    const opponent = tryMatch({ socketId: socket.id, difficulty, playerId, playerName });
     if (opponent) {
-      const { puzzle, solution } = generatePuzzle(difficulty);
-      const matchId = `${Date.now()}-${socket.id}-${opponent.socketId}`;
-      const startAtMs = Date.now() + 2000;
+      beginDuel(socket, io.sockets.sockets.get(opponent.socketId), difficulty);
+      return;
+    }
 
-      socket.join(matchId);
-      io.sockets.sockets.get(opponent.socketId)?.join(matchId);
+    // 2. Add to queue
+    const entry = { socketId: socket.id, difficulty, playerId, playerName };
+    matchQueue.push(entry);
+    socket.emit("matchmaking:queued");
+    broadcastQueueCounts();
 
-      socket.data.duelRoom = matchId;
-      socket.data.duelDifficulty = difficulty;
-      io.sockets.sockets.get(opponent.socketId).data.duelRoom = matchId;
-      io.sockets.sockets.get(opponent.socketId).data.duelDifficulty = difficulty;
-
-      const players = {
-        [socket.id]: { name: playerName || "Player 1", playerId, finishedAtMs: null, elapsedMs: null },
-        [opponent.socketId]: { name: opponent.playerName || "Player 2", playerId: opponent.playerId, finishedAtMs: null, elapsedMs: null }
-      };
-
-      socket.data.duelPlayers = players;
-      io.sockets.sockets.get(opponent.socketId).data.duelPlayers = players;
-      socket.data.duelSolution = solution;
-      io.sockets.sockets.get(opponent.socketId).data.duelSolution = solution;
-      socket.data.duelStartAtMs = startAtMs;
-      io.sockets.sockets.get(opponent.socketId).data.duelStartAtMs = startAtMs;
-      socket.data.duelOver = false;
-      io.sockets.sockets.get(opponent.socketId).data.duelOver = false;
-
-      io.to(socket.id).emit("matchmaking:found", {
-        matchId, difficulty, puzzle, solution, startAtMs,
-        opponentName: opponent.playerName || "Player 2",
-        playerSide: 1
-      });
-      io.to(opponent.socketId).emit("matchmaking:found", {
-        matchId, difficulty, puzzle, solution, startAtMs,
-        opponentName: playerName || "Player 1",
-        playerSide: 2
-      });
-
-      setTimeout(() => {
-        io.to(matchId).emit("duel:start", { startAtMs });
-      }, 0);
-    } else {
-      matchQueue.push(entry);
-      socket.emit("matchmaking:queued");
+    // 3. Reverse-check: any EXISTING queuer whose search range includes this entry?
+    //    (handles case where a higher-level player is already waiting)
+    for (let i = 0; i < matchQueue.length; i++) {
+      const q = matchQueue[i];
+      if (q.socketId === entry.socketId) continue;
+      if (searchRange(q.difficulty).includes(entry.difficulty)) {
+        matchQueue.splice(i, 1);
+        const eIdx = matchQueue.indexOf(entry);
+        if (eIdx !== -1) matchQueue.splice(eIdx, 1);
+        beginDuel(socket, io.sockets.sockets.get(q.socketId), q.difficulty);
+        return;
+      }
     }
   });
 
   socket.on("matchmaking:cancel", () => {
     const idx = matchQueue.findIndex(m => m.socketId === socket.id);
-    if (idx !== -1) matchQueue.splice(idx, 1);
+    if (idx !== -1) {
+      matchQueue.splice(idx, 1);
+      broadcastQueueCounts();
+    }
     socket.emit("matchmaking:cancelled");
   });
 
@@ -186,7 +295,6 @@ io.on("connection", (socket) => {
     const winner = finishedPlayers[0];
     const loser = finishedPlayers[1] || allPlayers.find(p => p !== winner);
 
-    // Emit result to the winner
     io.to(socket.id).emit("duel:result", {
       won: true,
       myTime: winner.elapsedMs,
@@ -195,7 +303,6 @@ io.on("connection", (socket) => {
       opponentName: loser.name
     });
 
-    // Mark opponent's duel as over and emit loss
     const opponentSocket = Object.keys(players).find(sid => sid !== socket.id);
     if (opponentSocket) {
       const oppSock = io.sockets.sockets.get(opponentSocket);
@@ -211,7 +318,6 @@ io.on("connection", (socket) => {
       }
     }
 
-    // Save stats
     const stats = loadStats();
     for (const sid of Object.keys(players)) {
       const p = players[sid];
@@ -231,11 +337,21 @@ io.on("connection", (socket) => {
     }
     saveStats(stats);
 
+    emitUnlocked(socket);
+    if (opponentSocket) {
+      const oppSock = io.sockets.sockets.get(opponentSocket);
+      if (oppSock) emitUnlocked(oppSock);
+    }
+
     delete socket.data.duelRoom;
     delete socket.data.duelPlayers;
     delete socket.data.duelSolution;
     delete socket.data.duelStartAtMs;
     delete socket.data.duelDifficulty;
+    if (opponentSocket) {
+      const oppSock = io.sockets.sockets.get(opponentSocket);
+      if (oppSock) cleanupSocketDuel(oppSock);
+    }
   });
 
   socket.on("disconnect", () => {
@@ -243,14 +359,31 @@ io.on("connection", (socket) => {
     lobbySockets.delete(socket.id);
     broadcastCount();
     const idx = matchQueue.findIndex(m => m.socketId === socket.id);
-    if (idx !== -1) matchQueue.splice(idx, 1);
+    if (idx !== -1) {
+      matchQueue.splice(idx, 1);
+      broadcastQueueCounts();
+    }
     const players = socket.data.duelPlayers;
-    if (players) {
-      const opponentSocket = Object.keys(players).find(sid => sid !== socket.id);
-      if (opponentSocket) {
-        const oppSock = io.sockets.sockets.get(opponentSocket);
+    if (players && !socket.data.duelOver) {
+      const oSid = Object.keys(players).find(sid => sid !== socket.id);
+      const oName = oSid ? players[oSid]?.name || "Opponent" : "Opponent";
+      const pid = socket.data.playerId;
+      if (pid) {
+        pendingDisconnectResults.set(pid, {
+          won: false,
+          myTime: null,
+          opponentTime: null,
+          winnerName: oName,
+          opponentName: socket.data.playerName || "Player",
+          disconnected: true
+        });
+      }
+      if (oSid) {
+        const oppSock = io.sockets.sockets.get(oSid);
         if (oppSock) {
           oppSock.emit("duel:opponentDisconnected");
+          oppSock.data.duelOver = true;
+          cleanupSocketDuel(oppSock);
         }
       }
     }
