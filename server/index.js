@@ -32,6 +32,30 @@ const io = new Server(server, { cors: { origin: "*", methods: ["GET", "POST"] } 
 
 const matchQueue = [];
 const lobbySockets = new Set();
+const lastHeartbeat = new Map();
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [sid, last] of lastHeartbeat) {
+    if (now - last > 15000) {
+      const sock = io.sockets.sockets.get(sid);
+      if (sock) {
+        const players = sock.data.duelPlayers;
+        if (players && !sock.data.duelOver) {
+          const opponentSocket = Object.keys(players).find(s => s !== sid);
+          if (opponentSocket) {
+            const oppSock = io.sockets.sockets.get(opponentSocket);
+            if (oppSock) {
+              oppSock.emit("duel:opponentDisconnected");
+            }
+          }
+          sock.data.duelOver = true;
+        }
+      }
+      lastHeartbeat.delete(sid);
+    }
+  }
+}, 5000);
 
 function broadcastCount() {
   io.emit("lobby:count", lobbySockets.size);
@@ -57,6 +81,12 @@ function verifySolution(board, solution) {
 }
 
 io.on("connection", (socket) => {
+  lastHeartbeat.set(socket.id, Date.now());
+
+  socket.on("presence:heartbeat", () => {
+    lastHeartbeat.set(socket.id, Date.now());
+  });
+
   socket.on("lobby:enter", ({ playerId, playerName }) => {
     socket.data.playerId = playerId;
     socket.data.playerName = playerName;
@@ -209,6 +239,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", () => {
+    lastHeartbeat.delete(socket.id);
     lobbySockets.delete(socket.id);
     broadcastCount();
     const idx = matchQueue.findIndex(m => m.socketId === socket.id);

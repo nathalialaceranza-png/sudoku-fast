@@ -701,6 +701,13 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, diffic
   }, [playerId, playerName]);
 
   useEffect(() => {
+    const iv = setInterval(() => {
+      if (socketRef.current?.connected) socketRef.current.emit("presence:heartbeat");
+    }, 5000);
+    return () => clearInterval(iv);
+  }, []);
+
+  useEffect(() => {
     let raf;
     const tick = () => { setNowMs(Date.now()); raf = requestAnimationFrame(tick); };
     raf = requestAnimationFrame(tick);
