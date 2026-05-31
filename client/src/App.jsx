@@ -628,6 +628,8 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, tab, o
   const [duelSolution, setDuelSolution] = useState(null);
   const [queueCounts, setQueueCounts] = useState({ Easy: 0, Medium: 0, Hard: 0, Expert: 0, Master: 0 });
   const [searchDiff, setSearchDiff] = useState(null);
+  const [opponentIsBot, setOpponentIsBot] = useState(false);
+  const [showCpuOption, setShowCpuOption] = useState(false);
   const COMPETE_LABELS = ["Compete in Easy", "Compete in Medium", "Compete in Hard", "Compete in Expert", "Compete in Master"];
   const UNLOCK_REQS = ["", "3 wins in Easy", "3 wins in Medium", "3 wins in Hard", "3 wins in Expert"];
 
@@ -648,6 +650,7 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, tab, o
   const gridRef = useRef(null);
   const socketRef = useRef(null);
   const confettiCanvasRef = useRef(null);
+  const boardRef = useRef(board);
 
   const LOCK_PRESS_MS = 180;
   const COMPLETE_FLASH_MS = 520;
@@ -680,6 +683,8 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, tab, o
     s.on("matchmaking:cancelled", () => { setPhase("lobby"); setSearchDiff(null); });
     s.on("matchmaking:found", (data) => {
       setSearchDiff(null);
+      setShowCpuOption(false);
+      setOpponentIsBot(!!data.opponentIsBot);
       setMatchData(data);
       setOpponentName(data.opponentName);
       setPlayerSide(data.playerSide);
@@ -719,6 +724,9 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, tab, o
       setDuelResult(data);
       setStopMs(Date.now());
       setTimeout(() => setShowResult(true), 500);
+      if (!data.won && data.bot && boardRef.current) {
+        s.emit("duel:boardForStats", { board: boardRef.current });
+      }
       fetch(`${SERVER_URL}/stats/${playerId}`).then(r => r.json()).then(d => {
         onStatsUpdate(d.compete || {});
       }).catch(() => {});
@@ -752,6 +760,15 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, tab, o
       myConfetti({ particleCount: 120, spread: 100, origin: { y: 0.6 }, colors: ["#4da3ff", "#40d39c", "#ffd700"] });
     }
   }, [showResult, duelResult]);
+
+  // Show Play vs CPU option after 5s of searching
+  useEffect(() => {
+    if (phase !== "searching") { setShowCpuOption(false); return; }
+    const t = setTimeout(() => setShowCpuOption(true), 5000);
+    return () => clearTimeout(t);
+  }, [phase, searchDiff]);
+
+  useEffect(() => { boardRef.current = board; }, [board]);
 
   useEffect(() => {
     let raf;
@@ -1002,6 +1019,12 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, tab, o
     setPhase("lobby");
   };
 
+  const handlePlayCPU = () => {
+    if (!socketRef.current || !searchDiff) return;
+    socketRef.current.emit("matchmaking:playCPU", { difficulty: searchDiff, playerId, playerName });
+    setShowCpuOption(false);
+  };
+
   const handleFinish = (optBoard) => {
     if (!socketRef.current || phase !== "duel") return;
     socketRef.current.emit("duel:finish", { board: optBoard || board });
@@ -1014,6 +1037,8 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, tab, o
     setStartMs(null);
     setStopMs(null);
     setSearchDiff(null);
+    setOpponentIsBot(false);
+    setShowCpuOption(false);
   };
 
   if (phase === "lobby") {
@@ -1075,6 +1100,11 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, tab, o
           <div style={{ fontSize: 14, color: "rgba(232,239,255,0.5)", marginBottom: 24 }}>
             {onlineCount} online
           </div>
+          {showCpuOption && (
+            <button style={{ ...s.primaryBtn, background: "linear-gradient(180deg, #40d39c, #2aa67a)", marginBottom: 12 }} onClick={handlePlayCPU}>
+              Play vs CPU 🤖
+            </button>
+          )}
           <button style={{ ...s.primaryBtn, background: "linear-gradient(180deg, #ff4d6d, #cc2450)" }} onClick={handleCancelSearch}>
             Cancel
           </button>
@@ -1130,10 +1160,20 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, tab, o
             <>
               <div style={{ fontSize: 46, marginBottom: 8 }}>🏆</div>
               <div style={{ fontSize: 22, fontWeight: 900, marginBottom: 12 }}>
-                Congratulations, your time is {formatTime(duelResult.myTime)}!
+                {duelResult.bot ? "You beat the computer!" : `Congratulations, your time is ${formatTime(duelResult.myTime)}!`}
               </div>
               <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 20, color: "#40d39c" }}>
                 You won!
+              </div>
+            </>
+          ) : duelResult.bot ? (
+            <>
+              <div style={{ fontSize: 46, marginBottom: 8 }}>😔</div>
+              <div style={{ fontSize: 22, fontWeight: 900, marginBottom: 12 }}>
+                The computer was faster!
+              </div>
+              <div style={{ fontSize: 16, marginBottom: 20, color: "rgba(232,239,255,0.7)" }}>
+                Your time was {formatTime(duelResult.myTime)}
               </div>
             </>
           ) : (

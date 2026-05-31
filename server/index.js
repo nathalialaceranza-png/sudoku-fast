@@ -31,10 +31,12 @@ const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*", methods: ["GET", "POST"] } });
 
 const DIFFICULTIES = ["Easy", "Medium", "Hard", "Expert", "Master"];
+const BOT_SEED_MS = { Easy: 120000, Medium: 180000, Hard: 300000, Expert: 420000, Master: 600000 };
 const matchQueue = [];
 const lobbySockets = new Set();
 const lastHeartbeat = new Map();
 const pendingDisconnectResults = new Map();
+const botTimers = new Map();
 
 function getUnlockedLevel(stats, playerId) {
   const c = stats[playerId]?.compete || {};
@@ -49,6 +51,22 @@ function emitUnlocked(socket) {
   const stats = loadStats();
   const level = getUnlockedLevel(stats, socket.data.playerId);
   socket.emit("matchmaking:unlocked", { level });
+}
+
+function getBotTime(difficulty) {
+  const stats = loadStats();
+  const bt = stats.botTimes?.[difficulty];
+  const avg = bt && bt.count > 0 ? bt.totalMs / bt.count : BOT_SEED_MS[difficulty] || 120000;
+  return Math.round(avg * (0.85 + Math.random() * 0.40));
+}
+
+function recordHumanTime(difficulty, elapsedMs) {
+  const stats = loadStats();
+  if (!stats.botTimes) stats.botTimes = {};
+  if (!stats.botTimes[difficulty]) stats.botTimes[difficulty] = { totalMs: 0, count: 0 };
+  stats.botTimes[difficulty].totalMs += elapsedMs;
+  stats.botTimes[difficulty].count++;
+  saveStats(stats);
 }
 
 function getQueueCounts() {
@@ -184,6 +202,81 @@ function beginDuel(sockA, sockB, difficulty) {
   }, 0);
 }
 
+function beginDuelCPU(sock, difficulty, botTargetMs) {
+  if (!sock) return;
+  const { puzzle, solution } = generatePuzzle(difficulty);
+  const givenCount = puzzle.filter(v => v !== 0).length;
+  const matchId = `${Date.now()}-${sock.id}-cpu`;
+  const startAtMs = Date.now() + 2000;
+
+  sock.join(matchId);
+
+  sock.data.duelRoom = matchId;
+  sock.data.duelDifficulty = difficulty;
+  sock.data.duelIsBot = true;
+  sock.data.duelGivenCount = givenCount;
+  sock.data.duelBotTargetMs = botTargetMs;
+
+  const players = {
+    [sock.id]: { name: sock.data.playerName || "Player", playerId: sock.data.playerId, finishedAtMs: null, elapsedMs: null },
+    cpu: { name: "Computer", playerId: null, finishedAtMs: null, elapsedMs: null }
+  };
+
+  sock.data.duelPlayers = players;
+  sock.data.duelSolution = solution;
+  sock.data.duelStartAtMs = startAtMs;
+  sock.data.duelOver = false;
+
+  io.to(sock.id).emit("matchmaking:found", {
+    matchId, difficulty, puzzle, solution, startAtMs,
+    opponentName: "🤖 Computer",
+    opponentIsBot: true,
+    botTargetMs,
+    playerSide: 1
+  });
+
+  // Bot timer — fires after botTargetMs from startAtMs
+  const botTimeout = setTimeout(() => {
+    const s = io.sockets.sockets.get(sock.id);
+    if (!s || s.data.duelOver) return;
+    if (!s.data.duelPlayers?.cpu?.finishedAtMs) {
+      s.data.duelPlayers.cpu.finishedAtMs = startAtMs + botTargetMs;
+      s.data.duelPlayers.cpu.elapsedMs = botTargetMs;
+      s.data.duelOver = true;
+
+      // Save stats (loss) for player
+      const stats = loadStats();
+      const pid = s.data.playerId;
+      if (pid) {
+        if (!stats[pid]) stats[pid] = { practice: {}, compete: {} };
+        if (!stats[pid].compete) stats[pid].compete = {};
+        if (!stats[pid].compete[difficulty]) stats[pid].compete[difficulty] = { wins: 0, losses: 0, bestMs: null };
+        stats[pid].compete[difficulty].losses++;
+        saveStats(stats);
+      }
+      emitUnlocked(s);
+
+      s.emit("duel:result", {
+        won: false,
+        myTime: null,
+        opponentTime: botTargetMs,
+        opponentName: "🤖 Computer",
+        winnerName: "🤖 Computer",
+        loserName: s.data.playerName || "Player",
+        bot: true
+      });
+      cleanupSocketDuel(s);
+    }
+    botTimers.delete(matchId);
+  }, botTargetMs + 2000);
+
+  botTimers.set(matchId, botTimeout);
+
+  setTimeout(() => {
+    io.to(matchId).emit("duel:start", { startAtMs });
+  }, 0);
+}
+
 function verifySolution(board, solution) {
   if (!Array.isArray(board) || board.length !== 81) return false;
   if (board.some(v => v === 0 || v === null || v === undefined)) return false;
@@ -266,6 +359,33 @@ io.on("connection", (socket) => {
     socket.emit("matchmaking:cancelled");
   });
 
+  socket.on("matchmaking:playCPU", ({ difficulty, playerId, playerName }) => {
+    // Remove from human queue if present
+    const idx = matchQueue.findIndex(m => m.socketId === socket.id);
+    if (idx !== -1) matchQueue.splice(idx, 1);
+    broadcastQueueCounts();
+
+    const stats = loadStats();
+    const level = getUnlockedLevel(stats, playerId);
+    if (DIFFICULTIES.indexOf(difficulty) > level) {
+      socket.emit("matchmaking:rejected", { message: "Level not unlocked" });
+      return;
+    }
+
+    socket.data.playerId = playerId;
+    socket.data.playerName = playerName;
+    const botTargetMs = getBotTime(difficulty);
+    beginDuelCPU(socket, difficulty, botTargetMs);
+  });
+
+  socket.on("duel:boardForStats", ({ board }) => {
+    if (!socket.data.duelIsBot || !socket.data.duelGivenCount) return;
+    const difficulty = socket.data.duelDifficulty;
+    const botTargetMs = socket.data.duelBotTargetMs;
+    const estimatedMs = Math.round(botTargetMs * 1.15);
+    recordHumanTime(difficulty, estimatedMs);
+  });
+
   socket.on("duel:finish", ({ board }) => {
     if (socket.data.duelOver) return;
     const roomCode = socket.data.duelRoom;
@@ -273,6 +393,7 @@ io.on("connection", (socket) => {
     const solution = socket.data.duelSolution;
     const startAtMs = socket.data.duelStartAtMs;
     const difficulty = socket.data.duelDifficulty;
+    const isBot = socket.data.duelIsBot;
     if (!roomCode || !players || !solution) return;
 
     const player = players[socket.id];
@@ -289,6 +410,60 @@ io.on("connection", (socket) => {
     player.elapsedMs = Math.max(0, now - startAtMs);
 
     socket.data.duelOver = true;
+
+    if (isBot) {
+      // Cancel bot timer
+      const bt = botTimers.get(roomCode);
+      if (bt) { clearTimeout(bt); botTimers.delete(roomCode); }
+
+      const cpuElapsed = players.cpu?.elapsedMs || Infinity;
+
+      if (player.elapsedMs <= cpuElapsed) {
+        io.to(socket.id).emit("duel:result", {
+          won: true,
+          myTime: player.elapsedMs,
+          opponentTime: cpuElapsed === Infinity ? null : cpuElapsed,
+          opponentName: "🤖 Computer",
+          winnerName: socket.data.playerName || "Player",
+          loserName: "🤖 Computer",
+          bot: true
+        });
+      } else {
+        io.to(socket.id).emit("duel:result", {
+          won: false,
+          myTime: player.elapsedMs,
+          opponentTime: cpuElapsed,
+          opponentName: "🤖 Computer",
+          winnerName: "🤖 Computer",
+          loserName: socket.data.playerName || "Player",
+          bot: true
+        });
+      }
+
+      // Record human time to improve bot average
+      recordHumanTime(difficulty, player.elapsedMs);
+
+      // Save stats for the player (wins/losses)
+      const stats = loadStats();
+      const pid = socket.data.playerId;
+      if (pid) {
+        if (!stats[pid]) stats[pid] = { practice: {}, compete: {} };
+        if (!stats[pid].compete) stats[pid].compete = {};
+        if (!stats[pid].compete[difficulty]) stats[pid].compete[difficulty] = { wins: 0, losses: 0, bestMs: null };
+        if (player.elapsedMs <= cpuElapsed) {
+          stats[pid].compete[difficulty].wins++;
+          if (stats[pid].compete[difficulty].bestMs === null || player.elapsedMs < stats[pid].compete[difficulty].bestMs) {
+            stats[pid].compete[difficulty].bestMs = player.elapsedMs;
+          }
+        } else {
+          stats[pid].compete[difficulty].losses++;
+        }
+        saveStats(stats);
+      }
+      emitUnlocked(socket);
+      cleanupSocketDuel(socket);
+      return;
+    }
 
     const allPlayers = Object.values(players);
     const finishedPlayers = allPlayers.filter(p => p.finishedAtMs).sort((a, b) => a.elapsedMs - b.elapsedMs);
