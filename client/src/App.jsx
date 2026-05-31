@@ -1101,9 +1101,14 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, tab, o
             {onlineCount} online
           </div>
           {showCpuOption && (
-            <button style={{ ...s.primaryBtn, background: "linear-gradient(180deg, #40d39c, #2aa67a)", marginBottom: 12 }} onClick={handlePlayCPU}>
-              Play vs CPU 🤖
-            </button>
+            <>
+              <button style={{ ...s.primaryBtn, background: "linear-gradient(180deg, #40d39c, #2aa67a)", marginBottom: 8 }} onClick={handlePlayCPU}>
+                Play vs CPU 🤖
+              </button>
+              <div style={{ fontSize: 12, color: "rgba(232,239,255,0.45)", marginBottom: 12 }}>
+                CPU trained on real match times
+              </div>
+            </>
           )}
           <button style={{ ...s.primaryBtn, background: "linear-gradient(180deg, #ff4d6d, #cc2450)" }} onClick={handleCancelSearch}>
             Cancel
