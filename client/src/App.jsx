@@ -57,13 +57,17 @@ function cellBox(index) { return Math.floor(cellRow(index) / 3) * 3 + Math.floor
 function manhattan(a, b) { return Math.abs(cellRow(a) - cellRow(b)) + Math.abs(cellCol(a) - cellCol(b)); }
 
 function formatTime(ms) {
+  if (!ms && ms !== 0) return "—";
   const total = Math.floor(ms / 1000);
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
+function randomId() {
+  try { return crypto.randomUUID(); } catch { return `${Date.now()}-${Math.random().toString(36).slice(2)}`; }
+}
 function getPlayerId() {
   let id = localStorage.getItem("sf_player_id");
-  if (!id) { id = crypto.randomUUID(); localStorage.setItem("sf_player_id", id); }
+  if (!id) { id = randomId(); localStorage.setItem("sf_player_id", id); }
   return id;
 }
 
@@ -84,6 +88,7 @@ export default function App() {
   const [practiceStats, setPracticeStats] = useState({});
   const [competeStats, setCompeteStats] = useState({});
   const [difficulty, setDifficulty] = useState("Medium");
+  const isAdmin = useMemo(() => new URLSearchParams(window.location.search).has("admin"), []);
 
   useEffect(() => {
     fetch(`${SERVER_URL}/stats/${playerId}`).then(r => r.json()).then(d => {
@@ -120,17 +125,20 @@ export default function App() {
         <PracticeView playerId={playerId} practiceStats={practiceStats}
           difficulty={difficulty} onDifficultyChange={setDifficulty}
           onStatsUpdate={s => setPracticeStats(s)}
-          tab={tab} onTabChange={setTab} />
-      ) : (
+          tab={tab} onTabChange={setTab}
+          isAdmin={isAdmin} />
+      ) : tab === "compete" ? (
         <CompeteView playerId={playerId} playerName={playerName}
           competeStats={competeStats} onStatsUpdate={s => setCompeteStats(s)}
           tab={tab} onTabChange={setTab} />
+      ) : (
+        <MetricsView onTabChange={setTab} />
       )}
     </div>
   );
 }
 
-function PracticeView({ playerId, practiceStats, onStatsUpdate, difficulty, onDifficultyChange, tab, onTabChange }) {
+function PracticeView({ playerId, practiceStats, onStatsUpdate, difficulty, onDifficultyChange, tab, onTabChange, isAdmin }) {
   const [board, setBoard] = useState(Array(81).fill(0));
   const [given, setGiven] = useState(new Set());
   const [solution, setSolution] = useState(null);
@@ -148,6 +156,7 @@ function PracticeView({ playerId, practiceStats, onStatsUpdate, difficulty, onDi
   const [freezeUntilMs, setFreezeUntilMs] = useState(0);
   const [noteConflictFlash, setNoteConflictFlash] = useState(null);
   const [completedFlash, setCompletedFlash] = useState({ rows: [], cols: [], boxes: [], untilMs: 0, originIndex: null });
+  const [leaveTarget, setLeaveTarget] = useState(null);
 
   const undoRef = useRef([]);
   const longPressRef = useRef(null);
@@ -156,6 +165,7 @@ function PracticeView({ playerId, practiceStats, onStatsUpdate, difficulty, onDi
   const dragVisitedRef = useRef(new Set());
   const gridRef = useRef(null);
   const confettiCanvasRef = useRef(null);
+  const leaveSessionRef = useRef(null);
 
   const LOCK_PRESS_MS = 180;
   const COMPLETE_FLASH_MS = 520;
@@ -479,12 +489,23 @@ function PracticeView({ playerId, practiceStats, onStatsUpdate, difficulty, onDi
   const completedWaveProgress = completedFlash.untilMs > nowMs
     ? 1 - (completedFlash.untilMs - nowMs) / COMPLETE_FLASH_MS : 1;
 
+  const confirmLeave = (targetTab) => {
+    if (startMs != null && !showWinModal) {
+      if (!leaveSessionRef.current) leaveSessionRef.current = { noClicks: 0, tabClicks: 0 };
+      leaveSessionRef.current.tabClicks++;
+      setLeaveTarget(targetTab);
+    } else {
+      onTabChange(targetTab);
+    }
+  };
+
   return (
     <div>
       <div style={s.tabArea}>
         <div style={s.tabRow}>
           <button style={{ ...s.tabBtnActive, marginRight: -1 }}>Practice</button>
-          <button style={{ ...s.tabBtn, marginLeft: -1 }} onClick={() => onTabChange("compete")}>Compete</button>
+          {isAdmin && <button style={{ ...s.tabBtn, marginLeft: -1, marginRight: -1 }} onClick={() => onTabChange("metrics")}>Metrics</button>}
+          <button style={{ ...s.tabBtn, marginLeft: -1 }} onClick={() => confirmLeave("compete")}>Compete</button>
         </div>
         <div style={s.headerContent}>
           <div style={s.row}>
@@ -596,6 +617,26 @@ function PracticeView({ playerId, practiceStats, onStatsUpdate, difficulty, onDi
           </div>
         </>
       )}
+      {leaveTarget && (
+        <div style={s.modalBackdrop}>
+          <div style={s.modalCard}>
+            <div style={s.modalTitle}>Leaving a game in progress</div>
+            <div style={s.modalText}>Are you sure?</div>
+            <div style={s.leaveRow}>
+              <button type="button" style={s.leaveBtnYes} onClick={() => {
+                const s = leaveSessionRef.current;
+                fetch("/analytics/leave", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "yes", view: "practice", elapsedMs, difficulty, noClicksAntes: s?.noClicks || 0, tabClicksAntes: s?.tabClicks || 0 }) }).catch(() => {});
+                onTabChange(leaveTarget); setLeaveTarget(null);
+              }}>YES</button>
+              <button type="button" style={s.leaveBtnNo} onClick={() => {
+                if (leaveSessionRef.current) leaveSessionRef.current.noClicks++;
+                fetch("/analytics/leave", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "no", view: "practice", elapsedMs, difficulty, noClicksAntes: leaveSessionRef.current?.noClicks || 0, tabClicksAntes: leaveSessionRef.current?.tabClicks || 0 }) }).catch(() => {});
+                setLeaveTarget(null);
+              }}>NO!</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -624,6 +665,7 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, tab, o
   const [freezeUntilMs, setFreezeUntilMs] = useState(0);
   const [noteConflictFlash, setNoteConflictFlash] = useState(null);
   const [completedFlash, setCompletedFlash] = useState({ rows: [], cols: [], boxes: [], untilMs: 0, originIndex: null });
+  const [leaveTarget, setLeaveTarget] = useState(null);
   const [playerSide, setPlayerSide] = useState(1);
   const [duelSolution, setDuelSolution] = useState(null);
   const [queueCounts, setQueueCounts] = useState({ Easy: 0, Medium: 0, Hard: 0, Expert: 0, Master: 0 });
@@ -651,6 +693,7 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, tab, o
   const socketRef = useRef(null);
   const confettiCanvasRef = useRef(null);
   const boardRef = useRef(board);
+  const leaveSessionRef = useRef(null);
 
   const LOCK_PRESS_MS = 180;
   const COMPLETE_FLASH_MS = 520;
@@ -1199,10 +1242,20 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, tab, o
     );
   }
 
+  const confirmLeave = (targetTab) => {
+    if (phase === "duel") {
+      if (!leaveSessionRef.current) leaveSessionRef.current = { noClicks: 0, tabClicks: 0 };
+      leaveSessionRef.current.tabClicks++;
+      setLeaveTarget(targetTab);
+    } else {
+      onTabChange(targetTab);
+    }
+  };
+
   return (
     <div style={s.tabArea}>
       <div style={s.tabRow}>
-        <button style={{ ...s.tabBtn, marginRight: -1 }} onClick={() => onTabChange("practice")}>Practice</button>
+        <button style={{ ...s.tabBtn, marginRight: -1 }} onClick={() => confirmLeave("practice")}>Practice</button>
         <button style={{ ...s.tabBtnActive, marginLeft: -1 }}>Compete</button>
       </div>
       <div style={s.headerContent}>
@@ -1291,6 +1344,95 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, tab, o
           })}
         </div>
       </div>
+      {leaveTarget && (
+        <div style={s.modalBackdrop}>
+          <div style={s.modalCard}>
+            <div style={s.modalTitle}>Leaving an active match</div>
+            <div style={s.modalText}>Are you sure?</div>
+            <div style={s.leaveRow}>
+              <button type="button" style={s.leaveBtnYes} onClick={() => {
+                const s = leaveSessionRef.current;
+                fetch("/analytics/leave", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "yes", view: "compete", elapsedMs, difficulty: matchData?.difficulty || "Unknown", noClicksAntes: s?.noClicks || 0, tabClicksAntes: s?.tabClicks || 0 }) }).catch(() => {});
+                onTabChange(leaveTarget); setLeaveTarget(null);
+              }}>YES</button>
+              <button type="button" style={s.leaveBtnNo} onClick={() => {
+                if (leaveSessionRef.current) leaveSessionRef.current.noClicks++;
+                fetch("/analytics/leave", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "no", view: "compete", elapsedMs, difficulty: matchData?.difficulty || "Unknown", noClicksAntes: leaveSessionRef.current?.noClicks || 0, tabClicksAntes: leaveSessionRef.current?.tabClicks || 0 }) }).catch(() => {});
+                setLeaveTarget(null);
+              }}>NO!</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MetricsView({ onTabChange }) {
+  const [data, setData] = useState([]);
+  const [sessions, setSessions] = useState({ practice: 0, compete: 0 });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      fetch("/analytics/leave").then(r => r.json()),
+      fetch("/analytics/sessions").then(r => r.json())
+    ]).then(([d, s]) => { setData(d); setSessions(s); setLoading(false); }).catch(() => setLoading(false));
+  }, []);
+
+  const total = data.length;
+  const totalGames = (sessions.practice || 0) + (sessions.compete || 0);
+  const modalRate = totalGames ? Math.round(total / totalGames * 100) : 0;
+  const yes = data.filter(d => d.action === "yes").length;
+  const no = data.filter(d => d.action === "no").length;
+  const yesPct = total ? Math.round(yes / total * 100) : 0;
+  const yesAfterNo = data.filter(d => d.action === "yes" && d.noClicksAntes > 0).length;
+  const yesAfterNoPct = yes ? Math.round(yesAfterNo / yes * 100) : 0;
+  const avgTabClicks = yes ? (data.filter(d => d.action === "yes").reduce((s, d) => s + (d.tabClicksAntes || 0), 0) / yes) : 0;
+  const pData = data.filter(d => d.view === "practice");
+  const cData = data.filter(d => d.view === "compete");
+  const pYes = pData.filter(d => d.action === "yes").length;
+  const cYes = cData.filter(d => d.action === "yes").length;
+  const pRate = sessions.practice ? Math.round(pData.length / sessions.practice * 100) : 0;
+  const cRate = sessions.compete ? Math.round(cData.length / sessions.compete * 100) : 0;
+
+  const row = (label, value, ok) => (
+    <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+      <span style={{ color: "rgba(232,239,255,0.7)" }}>{label}</span>
+      <span style={{ fontWeight: 700, color: ok != null ? (ok ? "#40d39c" : "#ff4d6d") : "inherit" }}>{value}</span>
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={s.tabArea}>
+        <div style={s.tabRow}>
+          <button style={{ ...s.tabBtn, marginRight: -1 }} onClick={() => onTabChange("practice")}>Practice</button>
+          <button style={{ ...s.tabBtnActive, marginLeft: -1 }}>Metrics</button>
+        </div>
+      </div>
+      {loading ? (
+        <div style={s.card}><div style={s.modalText}>Loading...</div></div>
+      ) : (
+        <div style={s.card}>
+          <div style={s.modalTitle}>Leave Decision Analytics</div>
+          <div style={{ ...s.modalSub, marginBottom: 16, fontSize: 14 }}>{total} registros em {totalGames} jogos</div>
+          {row("Modal acionado", `${total} / ${totalGames} (${modalRate}%)`, modalRate < 20)}
+          {row("YES", `${yes} (${yesPct}%)`, yesPct < 20)}
+          {row("NO!", `${no} (${100 - yesPct}%)`, yesPct < 20)}
+          {row("YES após NO! (falso positivo)", `${yesAfterNo} (${yesAfterNoPct}% dos YES)`, yesAfterNoPct < 30)}
+          {row("Média re-cliques na aba", avgTabClicks.toFixed(1) + "x", avgTabClicks < 1.5)}
+          <div style={{ fontSize: 14, color: "rgba(232,239,255,0.45)", marginTop: 16, marginBottom: 8 }}>Por view</div>
+          {row("Practice", `${pYes}/${pData.length} YES · ${pData.length}/${sessions.practice} jogos (${pRate}%)`)}
+          {row("Compete", `${cYes}/${cData.length} YES · ${cData.length}/${sessions.compete} jogos (${cRate}%)`)}
+          <div style={{ fontSize: 14, color: "rgba(232,239,255,0.45)", marginTop: 16, marginBottom: 8 }}>Últimos registros</div>
+          {data.slice(-10).reverse().map((d, i) => (
+            <div key={i} style={{ fontSize: 12, color: "rgba(232,239,255,0.6)", padding: "4px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+              {d.action === "yes" ? "✅ YES" : "❌ NO!"} | {d.view} | {d.difficulty} | {formatTime(d.elapsedMs)} | noClicks={d.noClicksAntes} tabClicks={d.tabClicksAntes}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1357,7 +1499,7 @@ const s = {
   timer: { fontWeight: 900, background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", padding: "8px 10px", borderRadius: 999, height: "fit-content" },
   statRow: { marginTop: 8, fontSize: 14, color: "rgba(232,239,255,0.6)" },
   muted: { marginTop: 10, fontSize: 12, color: "rgba(232,239,255,0.65)" },
-  grid: { display: "grid", gridTemplateColumns: "repeat(9, 1fr)", border: "2px solid rgba(255,255,255,0.20)", borderRadius: 16, overflow: "hidden", width: "100%", aspectRatio: "1 / 1", touchAction: "none", overscrollBehavior: "contain", position: "relative" },
+  grid: { display: "grid", gridTemplateColumns: "repeat(9, 1fr)", gridTemplateRows: "repeat(9, 1fr)", border: "2px solid rgba(255,255,255,0.20)", borderRadius: 16, overflow: "hidden", width: "100%", aspectRatio: "1 / 1", touchAction: "none", overscrollBehavior: "contain", position: "relative" },
   cell: { position: "relative", display: "grid", placeItems: "center", userSelect: "none", touchAction: "none", fontSize: 18, minHeight: 0, overflow: "hidden" },
   completedWave: { position: "absolute", inset: 0, background: "radial-gradient(circle, rgba(69, 214, 206, 0.58) 0%, rgba(69, 214, 206, 0.26) 52%, rgba(69, 214, 206, 0.0) 100%)", pointerEvents: "none", mixBlendMode: "screen" },
   noteConflictOverlay: { position: "absolute", inset: 0, boxShadow: "inset 0 0 14px rgba(69, 214, 206, 0.7), 0 0 20px rgba(69, 214, 206, 0.3)", borderRadius: 4, pointerEvents: "none" },
@@ -1385,4 +1527,7 @@ const s = {
   modalTitle: { fontSize: 26, fontWeight: 900, marginBottom: 8, color: "#ffffff" },
   modalText: { fontSize: 18, fontWeight: 800, color: "#dfe8ff", marginBottom: 6 },
   modalSub: { fontSize: 14, color: "rgba(232,239,255,0.78)", marginBottom: 18 },
+  leaveRow: { display: "flex", gap: 10, marginTop: 18 },
+  leaveBtnYes: { flex: 1, padding: "12px 0", borderRadius: 14, border: "1px solid rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.08)", color: "#e8efff", fontWeight: 700, fontSize: 15, cursor: "pointer" },
+  leaveBtnNo: { flex: 1, padding: "12px 0", borderRadius: 14, border: "none", background: "linear-gradient(180deg, #ff4d6d, #cc2450)", color: "white", fontWeight: 900, fontSize: 15, cursor: "pointer", boxShadow: "0 8px 20px rgba(204,36,80,0.35)" },
 };

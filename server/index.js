@@ -69,6 +69,13 @@ function recordHumanTime(difficulty, elapsedMs) {
   saveStats(stats);
 }
 
+function addGameSession(view) {
+  const stats = loadStats();
+  if (!stats.gameSessions) stats.gameSessions = {};
+  stats.gameSessions[view] = (stats.gameSessions[view] || 0) + 1;
+  saveStats(stats);
+}
+
 function getQueueCounts() {
   const counts = { Easy: 0, Medium: 0, Hard: 0, Expert: 0, Master: 0 };
   for (const entry of matchQueue) {
@@ -86,7 +93,6 @@ function cleanupSocketDuel(sock) {
   delete sock.data.duelPlayers;
   delete sock.data.duelSolution;
   delete sock.data.duelStartAtMs;
-  delete sock.data.duelDifficulty;
 }
 
 setInterval(() => {
@@ -158,6 +164,7 @@ function tryMatch(player) {
 
 function beginDuel(sockA, sockB, difficulty) {
   if (!sockA || !sockB) return;
+  addGameSession("compete");
   const { puzzle, solution } = generatePuzzle(difficulty);
   const matchId = `${Date.now()}-${sockA.id}-${sockB.id}`;
   const startAtMs = Date.now() + 2000;
@@ -204,6 +211,7 @@ function beginDuel(sockA, sockB, difficulty) {
 
 function beginDuelCPU(sock, difficulty, botTargetMs) {
   if (!sock) return;
+  addGameSession("compete");
   const { puzzle, solution } = generatePuzzle(difficulty);
   const givenCount = puzzle.filter(v => v !== 0).length;
   const matchId = `${Date.now()}-${sock.id}-cpu`;
@@ -569,6 +577,7 @@ app.get("/health", (req, res) => res.json({ ok: true }));
 
 app.get("/puzzle", (req, res) => {
   const difficulty = req.query.difficulty || "Medium";
+  addGameSession("practice");
   res.json(generatePuzzle(difficulty));
 });
 
@@ -587,6 +596,26 @@ app.post("/stats/practice", (req, res) => {
   if (!prev || elapsedMs < prev) stats[playerId].practice[difficulty] = elapsedMs;
   saveStats(stats);
   res.json({ ok: true, bestMs: stats[playerId].practice[difficulty] });
+});
+
+app.post("/analytics/leave", (req, res) => {
+  const { action, view, elapsedMs, difficulty, noClicksAntes, tabClicksAntes } = req.body;
+  if (!action || !view) return res.status(400).json({ error: "missing fields" });
+  const stats = loadStats();
+  if (!stats.leaveAnalytics) stats.leaveAnalytics = [];
+  stats.leaveAnalytics.push({ action, view, elapsedMs, difficulty, noClicksAntes: noClicksAntes || 0, tabClicksAntes: tabClicksAntes || 0, ts: Date.now() });
+  saveStats(stats);
+  res.json({ ok: true });
+});
+
+app.get("/analytics/leave", (req, res) => {
+  const stats = loadStats();
+  res.json(stats.leaveAnalytics || []);
+});
+
+app.get("/analytics/sessions", (req, res) => {
+  const stats = loadStats();
+  res.json(stats.gameSessions || { practice: 0, compete: 0 });
 });
 
 const PORT = process.env.PORT || 4000;

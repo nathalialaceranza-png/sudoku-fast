@@ -12,6 +12,7 @@ export default defineConfig({
       "/puzzle": "http://localhost:4000",
       "/stats": "http://localhost:4000",
       "/health": "http://localhost:4000",
+      "/analytics": "http://localhost:4000",
     }
   }
 });
