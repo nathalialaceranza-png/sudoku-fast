@@ -157,6 +157,7 @@ function PracticeView({ playerId, practiceStats, onStatsUpdate, difficulty, onDi
   const [noteConflictFlash, setNoteConflictFlash] = useState(null);
   const [completedFlash, setCompletedFlash] = useState({ rows: [], cols: [], boxes: [], untilMs: 0, originIndex: null });
   const [leaveTarget, setLeaveTarget] = useState(null);
+  const [hasInteracted, setHasInteracted] = useState(false);
 
   const undoRef = useRef([]);
   const longPressRef = useRef(null);
@@ -229,6 +230,7 @@ function PracticeView({ playerId, practiceStats, onStatsUpdate, difficulty, onDi
   }, [usedCount, showWinModal, noteMode]);
 
   const newGame = async (diff) => {
+    setHasInteracted(false);
     setStartMs(null);
     setStopMs(null);
     setShowWinModal(false);
@@ -292,6 +294,7 @@ function PracticeView({ playerId, practiceStats, onStatsUpdate, difficulty, onDi
 
   const onNumberPointerDown = (n) => {
     if (remainingOf(n) === 0 || showWinModal) return;
+    setHasInteracted(true);
     longPressFiredRef.current = false;
     longPressRef.current = setTimeout(() => { longPressFiredRef.current = true; pickNumber(n, { lock: true, toggleUnlockIfActive: false }); }, LOCK_PRESS_MS);
   };
@@ -336,6 +339,7 @@ function PracticeView({ playerId, practiceStats, onStatsUpdate, difficulty, onDi
 
   const toggleNote = (index, n) => {
     if (given.has(index) || board[index] !== 0 || showWinModal || isFrozen) return;
+    setHasInteracted(true);
     startTimerIfNeeded();
     const prevBoard = board.slice();
     const prevNotes = cloneNotes(notes);
@@ -370,6 +374,7 @@ function PracticeView({ playerId, practiceStats, onStatsUpdate, difficulty, onDi
   const placeValue = (index, value) => {
     if (showWinModal || isFrozen) return;
     if (given.has(index)) return;
+    setHasInteracted(true);
     startTimerIfNeeded();
     if (board[index] === value) { if (!locked) setSelectedNumber(null); return; }
     const conflictIndices = getConflictIndices(index, value);
@@ -412,6 +417,7 @@ function PracticeView({ playerId, practiceStats, onStatsUpdate, difficulty, onDi
 
   const eraseOneShot = (index) => {
     if (given.has(index) || showWinModal || isFrozen) return;
+    setHasInteracted(true);
     startTimerIfNeeded();
     const prevBoard = board.slice();
     const prevNotes = cloneNotes(notes);
@@ -490,7 +496,7 @@ function PracticeView({ playerId, practiceStats, onStatsUpdate, difficulty, onDi
     ? 1 - (completedFlash.untilMs - nowMs) / COMPLETE_FLASH_MS : 1;
 
   const confirmLeave = (targetTab) => {
-    if (startMs != null && !showWinModal) {
+    if (startMs != null && !showWinModal && hasInteracted) {
       if (!leaveSessionRef.current) leaveSessionRef.current = { noClicks: 0, tabClicks: 0 };
       leaveSessionRef.current.tabClicks++;
       setLeaveTarget(targetTab);
@@ -571,8 +577,8 @@ function PracticeView({ playerId, practiceStats, onStatsUpdate, difficulty, onDi
 
         <div style={s.actionBar}>
           <button type="button" style={s.actionBtn} onClick={handleUndo}><div style={s.actionIcon}>↶</div><div style={s.actionLabel}>Undo</div></button>
-          <button type="button" style={{ ...s.actionBtn, ...(eraseArmed ? s.actionBtnActiveDanger : null) }} onClick={() => { setEraseArmed(true); setSelectedNumber(null); }}><div style={s.actionIcon}>⌫</div><div style={s.actionLabel}>Erase</div></button>
-          <button type="button" style={{ ...s.actionBtn, ...(noteMode ? s.actionBtnActive : null) }} onClick={() => setNoteMode(v => !v)}>
+          <button type="button" style={{ ...s.actionBtn, ...(eraseArmed ? s.actionBtnActiveDanger : null) }} onClick={() => { setEraseArmed(true); setSelectedNumber(null); setHasInteracted(true); }}><div style={s.actionIcon}>⌫</div><div style={s.actionLabel}>Erase</div></button>
+          <button type="button" style={{ ...s.actionBtn, ...(noteMode ? s.actionBtnActive : null) }} onClick={() => { setHasInteracted(true); setNoteMode(v => !v); }}>
             <div style={s.actionIconWrap}><div style={s.actionIcon}>✎</div><div style={s.miniPill}>{noteMode ? "ON" : "OFF"}</div></div>
             <div style={s.actionLabel}>Notes</div>
           </button>
