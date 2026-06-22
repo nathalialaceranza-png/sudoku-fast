@@ -1,0 +1,22 @@
+# Sudoku Fast
+> Real-time competitive Sudoku built for speed. Designed for fast one-handed play on mobile — swipe to fill, long-press to lock, zero unnecessary taps.
+
+## How to play
+- Practice mode: solve puzzles solo across 5 difficulties (Easy to Master)
+- Compete mode: match against players worldwide or challenge the adaptive CPU
+- The CPU learns from real player times and adapts to human skill
+
+## Key features
+- One-handed mobile-first controls: swipe, long-press lock, drag-to-fill
+- 5 difficulty levels: Easy, Medium, Hard, Expert, Master
+- Real-time PvP matchmaking with cross-difficulty fallback
+- Adaptive AI opponent trained on actual player completion times
+- Pencil marks (notes), undo, eraser
+- Completion wave animation and freeze penalty on errors
+- Cross-difficulty matching so you never wait long for a game
+
+## Tech
+- Node.js + Express + Socket.IO backend
+- React + Vite frontend
+- No database — all state persisted to JSON
+- Deployed on Render

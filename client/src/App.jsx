@@ -134,6 +134,9 @@ export default function App() {
       ) : (
         <MetricsView onTabChange={setTab} />
       )}
+      <footer style={{ fontSize: 12, color: "rgba(232,239,255,0.35)", textAlign: "center", marginTop: 24, paddingBottom: 16 }}>
+        Sudoku Fast — built for one-handed speed. Practice, compete in real-time PvP, or challenge the adaptive CPU.
+      </footer>
     </div>
   );
 }
