@@ -1214,7 +1214,7 @@ function CompeteView({ playerId, playerName, competeStats, onStatsUpdate, tab, o
             <>
               <div style={{ fontSize: 46, marginBottom: 8 }}>🏆</div>
               <div style={{ fontSize: 22, fontWeight: 900, marginBottom: 12 }}>
-                {duelResult.bot ? "You beat the computer!" : `Congratulations, your time is ${formatTime(duelResult.myTime)}!`}
+                {duelResult.bot ? `You beat the computer! Your time was ${formatTime(duelResult.myTime)}!` : `Congratulations, your time is ${formatTime(duelResult.myTime)}!`}
               </div>
               <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 20, color: "#40d39c" }}>
                 You won!

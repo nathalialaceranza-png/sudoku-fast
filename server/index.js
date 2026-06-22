@@ -266,7 +266,7 @@ function beginDuelCPU(sock, difficulty, botTargetMs) {
 
       s.emit("duel:result", {
         won: false,
-        myTime: null,
+        myTime: Date.now() - startAtMs,
         opponentTime: botTargetMs,
         opponentName: "🤖 Computer",
         winnerName: "🤖 Computer",
